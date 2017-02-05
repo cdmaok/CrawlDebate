@@ -7,25 +7,23 @@ from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import time,random
+from selenium.common.exceptions import NoSuchElementException
+import time,random,sys
 from multiprocessing import Pool
+import signal
 
 path = '/home/cdmaok/phantomjs-2.1.1-linux-x86_64/bin/phantomjs'
-
 domain = 'http://www.debate.org/'
 
-'''
-browser = webdriver.PhantomJS('../path_to/phantomjs',service_args=service_args)
-'''
 
-
-def getTopicVote(url):
-	c = TopicCrawl(url)
+def getTopicVote(index,url):
+	c = TopicCrawl(index,url)
 	c.crawl()
 
 class TopicCrawl:
 
-	def __init__(self,url):
+	def __init__(self,index,url):
+		self.index = index
 		service_args = ['--proxy=127.0.0.1:1080','--proxy-type=socks5']
 		self.topic = url.split('/')[-1]
 		self.url = domain + url
@@ -34,36 +32,52 @@ class TopicCrawl:
 	def crawl(self):
 		self.driver.get(self.url)		
 		self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-		a = self.driver.find_element_by_class_name('debate-more-holder')
-		size = len(self.driver.page_source)
-		times = 0
-		while times < 2:
-			a.click()
-			time.sleep(3)
-			tmp = len(self.driver.page_source)
-			if tmp != size: 
-				size = tmp
-			else:
-				times += 1
-		self.analyse(self.driver.page_source)
-		self.driver.close()
+		a = None
+		try:
+			a = self.driver.find_element_by_class_name('debate-more-holder')
+			size = len(self.driver.page_source)
+			times = 0
+			while times < 2:
+				a.click()
+				time.sleep(3)
+				tmp = len(self.driver.page_source)
+				if tmp != size: 
+					size = tmp
+				else:
+					times += 1
+		except NoSuchElementException:
+			pass
+		finally:
+			self.analyse(self.driver.page_source)
+			self.driver.close()
+			print 'finish crawling with topic',self.index,self.topic
 
 	def analyse(self,string):
 		bs = BeautifulSoup(string,"html.parser")
 		yes_list = bs.find('div',{'class':'arguments args-yes'})
-		self.parse_list(yes_list,'Yes')
 		no_list = bs.find('div',{'class':'arguments args-no'})
-		self.parse_list(no_list,'No')
+		yesvote = self.parse_list(yes_list,'Yes') 
+		novote = self.parse_list(no_list,'No')
+		if len(yesvote) == 0 or len(novote) == 0:
+			return
+		self.save(yesvote + novote)
+
+	def save(self,votes):
+		output = open('./votes','a+')
+		output.write('\n'.join(votes)+'\n')
+		output.close()
 	
 		
 	def parse_list(self,content,flag):
+		ans = []
 		for vote in BeautifulSoup(str(content),"html.parser").find_all('li',{'class':'hasData'}):
 			cite = vote.div.cite
 			user = None
 			if cite.a != None:
 				user = cite.a.text
-				print self.topic,flag,user
+				ans.append(' '.join([self.topic,flag,str(user).strip()]))
 				continue
+		return ans
 			
 
 def main():
@@ -85,7 +99,8 @@ def gettopic(string):
 		output.write(a['href'].encode('utf-8')+'\n')
 	output.close()
 
-
+def init_worker():
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 if __name__ == '__main__':
 	
@@ -97,9 +112,27 @@ if __name__ == '__main__':
 	#getTopicVote(title)
 	
 	topics = [line.strip() for line in open('./topiclist').readlines()]
-	#map(getTopicVote,topics[:3])
-	pool = Pool(1)
-	for t in topics[:5]:
-		pool.apply_async(getTopicVote,(t,))
-	pool.close()
+
+	'''
+	for index,t in enumerate(topics[1:3]):
+		getTopicVote(index,t)
+
+	
+	'''
+	pool = Pool(2,init_worker)
+	try:
+		threads = [pool.apply_async(getTopicVote,(index,t,)) for index,t in enumerate(topics[:6])]
+		pool.close()
+		
+		while True:
+			if all(r.ready() for r in threads):
+				print 'All processes completed' 
+				sys.exit()
+			time.sleep(1)
+
+	except KeyboardInterrupt:
+		print "Caught KeyboardInterrupt, terminating workers"
+        	pool.terminate()
+        	pool.join()
 	pool.join()
+	
