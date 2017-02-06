@@ -12,7 +12,7 @@ import time,random,sys
 from multiprocessing import Pool
 import signal
 
-path = '/home/cdmaok/phantomjs-2.1.1-linux-x86_64/bin/phantomjs'
+path = '/home/yangying/phantomjs-2.1.1-linux-x86_64/bin/phantomjs'
 domain = 'http://www.debate.org/'
 
 
@@ -59,8 +59,9 @@ class TopicCrawl:
 		yesvote = self.parse_list(yes_list,'Yes') 
 		novote = self.parse_list(no_list,'No')
 		if len(yesvote) == 0 or len(novote) == 0:
-			return
-		self.save(yesvote + novote)
+			print 'nothing to save' 
+		else:
+			self.save(yesvote + novote)
 
 	def save(self,votes):
 		output = open('./votes','a+')
@@ -119,9 +120,9 @@ if __name__ == '__main__':
 
 	
 	'''
-	pool = Pool(2,init_worker)
+	pool = Pool(5,init_worker)
 	try:
-		threads = [pool.apply_async(getTopicVote,(index,t,)) for index,t in enumerate(topics[:6])]
+		threads = [pool.apply_async(getTopicVote,(index,t,)) for index,t in enumerate(topics[11215:])]
 		pool.close()
 		
 		while True:
@@ -135,4 +136,3 @@ if __name__ == '__main__':
         	pool.terminate()
         	pool.join()
 	pool.join()
-	
